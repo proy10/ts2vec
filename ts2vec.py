@@ -1,4 +1,5 @@
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import TensorDataset, DataLoader
 import numpy as np
@@ -56,6 +57,8 @@ class TS2Vec:
         
         self.n_epochs = 0
         self.n_iters = 0
+
+        self.criterion = nn.MSELoss()
     
     def fit(self, train_data, n_epochs=None, n_iters=None, verbose=False):
         ''' Training the TS2Vec model.
@@ -97,6 +100,7 @@ class TS2Vec:
                 break
             
             cum_loss = 0
+            cum_loss2 = 0
             n_epoch_iters = 0
             
             interrupted = False
@@ -109,7 +113,8 @@ class TS2Vec:
                 if self.max_train_length is not None and x.size(1) > self.max_train_length:
                     window_offset = np.random.randint(x.size(1) - self.max_train_length + 1)
                     x = x[:, window_offset : window_offset + self.max_train_length]
-                x = x.to(self.device)
+                x = x.to(self.device)  # torch.Size([8, 577, 1])
+                # print("xshape", x.shape)
                 
                 ts_l = x.size(1)
                 crop_l = np.random.randint(low=2 ** (self.temporal_unit + 1), high=ts_l+1)
@@ -120,24 +125,37 @@ class TS2Vec:
                 crop_offset = np.random.randint(low=-crop_eleft, high=ts_l - crop_eright + 1, size=x.size(0))
                 
                 optimizer.zero_grad()
-                
-                out1 = self._net(take_per_row(x, crop_offset + crop_eleft, crop_right - crop_eleft))
+
+                input1 = take_per_row(x, crop_offset + crop_eleft, crop_right - crop_eleft)  # torch.Size([8, 528, 1])
+                # print("input:\n", input1)
+                # print("input shape\n", input1.shape)
+                # out1 = self._net(take_per_row(x, crop_offset + crop_eleft, crop_right - crop_eleft))
+                out1, enc_out1 = self._net(input1)
+                input1 = input1[:, -crop_l:]
                 out1 = out1[:, -crop_l:]
-                
-                out2 = self._net(take_per_row(x, crop_offset + crop_left, crop_eright - crop_left))
+                enc_out1 = enc_out1[:, -crop_l:]
+
+                input2 = take_per_row(x, crop_offset + crop_left, crop_eright - crop_left)
+                out2, enc_out2 = self._net(input2)
+                input2 = input2[:, :crop_l]
                 out2 = out2[:, :crop_l]
+                enc_out2 = enc_out2[:, :crop_l]
                 
                 loss = hierarchical_contrastive_loss(
                     out1,
                     out2,
                     temporal_unit=self.temporal_unit
                 )
-                
+                loss2 = (self.criterion(enc_out1, input1) + self.criterion(enc_out2, input2)) / 2
+
                 loss.backward()
+                loss2.backward()
+
                 optimizer.step()
                 self.net.update_parameters(self._net)
                     
                 cum_loss += loss.item()
+                cum_loss2 += loss2.item()
                 n_epoch_iters += 1
                 
                 self.n_iters += 1
@@ -149,9 +167,11 @@ class TS2Vec:
                 break
             
             cum_loss /= n_epoch_iters
+            cum_loss2 /= n_epoch_iters
             loss_log.append(cum_loss)
             if verbose:
                 print(f"Epoch #{self.n_epochs}: loss={cum_loss}")
+                # print(f"Epoch #{self.n_epochs}: loss={cum_loss2}")
             self.n_epochs += 1
             
             if self.after_epoch_callback is not None:
@@ -160,7 +180,7 @@ class TS2Vec:
         return loss_log
     
     def _eval_with_pooling(self, x, mask=None, slicing=None, encoding_window=None):
-        out = self.net(x.to(self.device, non_blocking=True), mask)
+        out, _ = self.net(x.to(self.device, non_blocking=True), mask)
         if encoding_window == 'full_series':
             if slicing is not None:
                 out = out[:, slicing]

@@ -2,23 +2,28 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 
+
 def hierarchical_contrastive_loss(z1, z2, alpha=0.5, temporal_unit=0):
     loss = torch.tensor(0., device=z1.device)
     d = 0
     while z1.size(1) > 1:
         if alpha != 0:
-            loss += alpha * instance_contrastive_loss(z1, z2)
+            # loss += alpha * instance_contrastive_loss(z1, z2)
+            loss += alpha * two_branch_instance_contrastive_loss(z1, z2)
         if d >= temporal_unit:
             if 1 - alpha != 0:
-                loss += (1 - alpha) * temporal_contrastive_loss(z1, z2)
+                # loss += (1 - alpha) * temporal_contrastive_loss(z1, z2)
+                loss += (1 - alpha) * two_branch_temporal_contrastive_loss(z1, z2)
         d += 1
         z1 = F.max_pool1d(z1.transpose(1, 2), kernel_size=2).transpose(1, 2)
         z2 = F.max_pool1d(z2.transpose(1, 2), kernel_size=2).transpose(1, 2)
     if z1.size(1) == 1:
         if alpha != 0:
-            loss += alpha * instance_contrastive_loss(z1, z2)
+            # loss += alpha * instance_contrastive_loss(z1, z2)
+            loss += alpha * two_branch_instance_contrastive_loss(z1, z2)
         d += 1
     return loss / d
+
 
 def instance_contrastive_loss(z1, z2):
     B, T = z1.size(0), z1.size(1)
@@ -35,6 +40,7 @@ def instance_contrastive_loss(z1, z2):
     loss = (logits[:, i, B + i - 1].mean() + logits[:, B + i, i].mean()) / 2
     return loss
 
+
 def temporal_contrastive_loss(z1, z2):
     B, T = z1.size(0), z1.size(1)
     if T == 1:
@@ -48,3 +54,11 @@ def temporal_contrastive_loss(z1, z2):
     t = torch.arange(T, device=z1.device)
     loss = (logits[:, t, T + t - 1].mean() + logits[:, T + t, t].mean()) / 2
     return loss
+
+
+def two_branch_instance_contrastive_loss(z1, z2):
+    return (instance_contrastive_loss(z1, z2) + instance_contrastive_loss(z2, z1)) / 2
+
+
+def two_branch_temporal_contrastive_loss(z1, z2):
+    return (temporal_contrastive_loss(z1, z2) + temporal_contrastive_loss(z2, z1)) / 2

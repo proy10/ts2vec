@@ -92,3 +92,8 @@ test_repr = model.encode(
 )  # n_instances x n_timestamps x output_dims
 # (The timestamp t's representation vector is computed using the observations located in [t-50, t])
 ```
+
+//添加projection层，两阶段学习，detach
+python -u train.py Car UCR --loader UCR --batch-size 8 --repr-dims 320 --max-threads 8 --seed 42 --eval
+掩码方式，Bert
+//loss
