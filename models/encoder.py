@@ -4,6 +4,7 @@ from torch import nn
 import torch.nn.functional as F
 import numpy as np
 from .dilated_conv import DilatedConvEncoder
+from .RevIN import RevIN
 
 
 def generate_continuous_mask(B, T, n=5, l=0.1):
@@ -37,12 +38,14 @@ def generate_bert_mask(B, T, p=0.15):
 
 
 class TSEncoder(nn.Module):
-    def __init__(self, input_dims, output_dims, hidden_dims=64, depth=10, mask_mode='binomial'):
+    def __init__(self, input_dims, output_dims, hidden_dims=64, depth=10, mask_mode='binomial', use_revin=True):
         super().__init__()
         self.input_dims = input_dims
         self.output_dims = output_dims
         self.hidden_dims = hidden_dims
         self.mask_mode = mask_mode
+        self.use_revin = use_revin
+
         self.input_fc = nn.Linear(input_dims, hidden_dims)
         self.feature_extractor = DilatedConvEncoder(
             hidden_dims,
@@ -51,10 +54,17 @@ class TSEncoder(nn.Module):
         )
         self.repr_dropout = nn.Dropout(p=0.1)
         self.projection = nn.Linear(output_dims, input_dims)
+
+        if self.use_revin:
+            self.revin_layer = RevIN(input_dims)
         
     def forward(self, x, mask_mode=None):  # x: B x T x input_dims
         nan_mask = ~x.isnan().any(axis=-1)
         x[~nan_mask] = 0
+
+        if self.use_revin:
+            x = self.revin_layer(x, 'norm')
+
         x = self.input_fc(x)  # B x T x Ch
         
         # generate & apply mask
@@ -97,6 +107,9 @@ class TSEncoder(nn.Module):
         x = x.transpose(1, 2)  # B x T x Co
 
         enc_out = self.projection(x.detach())
+
+        if self.use_revin:
+            enc_out = self.revin_layer(enc_out, 'denorm')
 
         return x, enc_out
         
