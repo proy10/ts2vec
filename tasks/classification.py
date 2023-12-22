@@ -35,5 +35,9 @@ def eval_classification(model, train_data, train_labels, test_data, test_labels,
         y_score = clf.decision_function(test_repr)
     test_labels_onehot = label_binarize(test_labels, classes=np.arange(train_labels.max()+1))
     auprc = average_precision_score(test_labels_onehot, y_score)
-    
+
+    file = "results.txt"
+    with open(file, 'a') as f:
+        f.write("acc: {}, auprc: {}\n".format(acc, auprc))
+
     return y_score, { 'acc': acc, 'auprc': auprc }
